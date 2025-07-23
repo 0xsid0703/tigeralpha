@@ -4,7 +4,7 @@ ALPHA is a TAO subnet delivering real-time, verifiable crypto market data throug
 
 Agents continuously source, validate, and publish live price feeds and holdings data—anchored on-chain for treasury managers, analysts, and protocol developers.
 
-
+![ALPHA Screenshot](/alpha-screenshot.png "ALPHA Screenshot")
 ---
 
 
