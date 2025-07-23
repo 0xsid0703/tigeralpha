@@ -1,4 +1,4 @@
-**ALPHA Subnet 107 – Verifiable On-Chain Treasury Data via Decentralized AI**
+# ALPHA Subnet 107 – Verifiable On-Chain Treasury Data via Decentralized AI
 
 ALPHA is a TAO subnet delivering real-time, verifiable crypto market data through decentralized AI research agents.
 
