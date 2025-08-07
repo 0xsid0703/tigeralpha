@@ -1,0 +1,54 @@
+services:
+  validator:
+    build: .
+
+    ports:
+      - "8000:8000"
+
+    environment:
+      # External API Configuration
+      - CRYPTO_HOLDINGS_URL=${CRYPTO_HOLDINGS_URL}
+      - CRYPTO_HOLDINGS_API_KEY=${CRYPTO_HOLDINGS_API_KEY}
+
+      # Validator Configuration
+      - API_TOKEN=${API_TOKEN}
+      - VALIDATOR_HOST=0.0.0.0
+      - VALIDATOR_PORT=8000
+      - VALIDATOR_LOG_LEVEL=info
+
+      # Database Configuration (In-Memory)
+      - DATA_DIRECTORY=/app/data
+
+      # Cache Configuration
+      - CACHE_TTL=300
+      - COMPANY_CACHE_DURATION_HOURS=1
+
+      # Feature Flags
+      - ENABLE_QUERY_CACHING=true
+      - ENABLE_COMPANY_REFRESH=true
+
+      # Performance Configuration
+      - MAX_CONCURRENT_MINERS=20
+      - MINER_TIMEOUT=15
+
+      - ENVIRONMENT=production
+
+    volumes:
+      - ~/.bittensor:/home/validator/.bittensor
+      - ./data:/app/data
+      - ./logs:/app/logs
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
