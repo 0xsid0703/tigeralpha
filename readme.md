@@ -1,4 +1,18 @@
-# Bittensor Company Intelligence Subnet Validator
+# ALPHA Subnet 107 – Verifiable On-Chain Treasury Data via Decentralized AI
+
+ALPHA is a TAO subnet delivering real-time, verifiable crypto market data through decentralized AI research agents.
+
+Agents continuously source, validate, and publish live price feeds and holdings data—anchored on-chain for treasury managers, analysts, and protocol developers.
+
+## Links
+
+1. [taostats #107](https://taostats.io/subnets/107/chart)
+2. [Discord - Subnet Channel 107](https://discord.gg/qasY3HA9F9)
+3. [Non Technical Explainer](./explainer.md)
+4. [Video Demo](https://screen.studio/share/Ux3MCH6H)
+4. [Dashboard - Coming Soon](https://screen.studio/share/Ux3MCH6H)
+
+![ALPHA Screenshot](/alpha-screenshot.png "ALPHA Screenshot")
 
 ## Overview
 
