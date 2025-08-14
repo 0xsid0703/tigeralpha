@@ -10,7 +10,7 @@ Agents continuously source, validate, and publish live price feeds and holdings 
 2. [Discord - Subnet Channel 107](https://discord.gg/qasY3HA9F9)
 3. [Non Technical Explainer](./explainer.md)
 4. [Video Demo](https://screen.studio/share/Ux3MCH6H)
-4. [Dashboard - Coming Soon](https://screen.studio/share/Ux3MCH6H)
+5. [Dashboard - Coming Soon](https://screen.studio/share/Ux3MCH6H)
 
 ![ALPHA Screenshot](/alpha-screenshot.png "ALPHA Screenshot")
 
@@ -57,15 +57,18 @@ The validator implements a sophisticated three-tier validation system:
 ### Core Components
 
 #### 1. Company Database (`company_database.py`)
+
 Manages company information with intelligent caching and fallback mechanisms.
 
 **Key Features:**
+
 - External API integration for fresh company data
 - Fallback to hardcoded company list for reliability
 - Sector-based organization
 - Market cap filtering for different query strategies
 
 #### 2. Query Generator (`query_generator.py`)
+
 Generates sophisticated queries using multiple strategies:
 
 - **Popular Companies** (40%): Large, well-known companies
@@ -75,22 +78,27 @@ Generates sophisticated queries using multiple strategies:
 - **Random Selection** (10%): Diverse sampling
 
 #### 3. Response Validator (`response_validator.py`)
+
 Implements two-tier validation system:
 
 **Tier 1: Structure Validation**
+
 - JSON schema validation
 - Required field checking
 - Data type validation
 - Completeness scoring
 
 **Tier 2: External API Validation**
+
 - Real-time data verification
 - Field-by-field accuracy scoring
 - Freshness assessment
 - Confidence calculation
 
 #### 4. Incentive Mechanism (`incentive_mechanism.py`)
+
 Calculates miner rewards based on:
+
 - Response accuracy
 - Response time
 - Confidence alignment
@@ -99,21 +107,27 @@ Calculates miner rewards based on:
 ### Support Components
 
 #### 5. External API Client (`external_api_client.py`)
+
 Handles all external API communications with:
+
 - Rate limiting
 - Circuit breaker pattern
 - Response caching
 - Error handling and retry logic
 
 #### 6. Configuration Management (`config.py`)
+
 Centralized configuration with:
+
 - Environment-specific settings
 - Validation weights configuration
 - Feature flags
 - Performance tuning parameters
 
 #### 7. HTTP Server (`server.py`, `routes.py`)
+
 Provides external API access with:
+
 - Bearer token authentication
 - RESTful endpoints
 - CORS support
@@ -131,17 +145,20 @@ Provides external API access with:
 ### Installation Steps
 
 1. **Clone the Repository**
+
 ```bash
-git clone <repository-url>
-cd bittensor-company-intelligence-validator
+git clone https://github.com/tigerinvests-com/sn107-alpha/
+cd sn107-alpha
 ```
 
 2. **Install Dependencies**
+
 ```bash
 pip install -r requirements.txt
 ```
 
 3. **Set Up Bittensor Wallet**
+
 ```bash
 # Create or import wallet
 btcli wallet new_coldkey  --wallet.name validator
@@ -181,6 +198,7 @@ CACHE_TTL=300
 ### Core Configuration Options
 
 #### Validation Weights
+
 Controls the balance between validation tiers:
 
 ```bash
@@ -241,7 +259,7 @@ python validators/server.py \
 
 ```bash
 # Build and run with Docker Compose
-docker-compose up -d
+docker-compose  --env-file ./.env.example up -d
 
 # View logs
 docker-compose logs -f validator
@@ -278,11 +296,13 @@ curl -H "Authorization: Bearer your-api-token" \
 ### Available Endpoints
 
 #### 1. Query Miners
+
 **POST** `/validator/query`
 
 Query subnet miners for company intelligence.
 
 **Request Body:**
+
 ```json
 {
   "ticker": "AAPL",
@@ -291,6 +311,7 @@ Query subnet miners for company intelligence.
 ```
 
 **Response:**
+
 ```json
 {
   "query_id": "query_1673123456_AAPL",
@@ -319,11 +340,13 @@ Query subnet miners for company intelligence.
 ```
 
 #### 2. Get Miners
+
 **GET** `/validator/miners`
 
 Get list of available miners.
 
 **Response:**
+
 ```json
 {
   "total_miners": 25,
@@ -340,11 +363,13 @@ Get list of available miners.
 ```
 
 #### 3. Get Scores
+
 **GET** `/validator/scores`
 
 Get current miner scores.
 
 **Response:**
+
 ```json
 {
   "scores": {
@@ -357,11 +382,13 @@ Get current miner scores.
 ```
 
 #### 4. Health Check
+
 **GET** `/status`
 
 Basic health check.
 
 **Response:**
+
 ```json
 {
   "status": "ok"
@@ -369,11 +396,13 @@ Basic health check.
 ```
 
 #### 5. Validator Info
+
 **GET** `/info`
 
 Detailed validator information.
 
 **Response:**
+
 ```json
 {
   "status": "healthy",
@@ -427,10 +456,12 @@ VALIDATOR_LOG_LEVEL=debug  # debug, info, warning, error
 Monitor validator health using:
 
 1. **HTTP Health Endpoints**:
+
    - `/status` - Basic health check
    - `/info` - Detailed status information
 
 2. **Log Analysis**:
+
    - Look for "✅" success indicators
    - Monitor "💥" error messages
    - Track validation round completion
@@ -444,6 +475,7 @@ Monitor validator health using:
 ### Maintenance Tasks
 
 #### State Management
+
 The validator automatically saves and loads state:
 
 ```bash
@@ -507,30 +539,38 @@ export SAVE_VALIDATION_DETAILS=true
 ### Common Issues
 
 #### 1. "No miners available"
+
 **Cause**: No miners are registered or online
 **Solution**:
+
 - Check network connectivity
 - Verify miners are running
 - Check subnet registration
 
 #### 2. "External API validation failed"
+
 **Cause**: External API is unreachable or misconfigured
 **Solution**:
+
 - Check API credentials
 - Verify API endpoint URL
 - Check network connectivity
 - Review rate limiting
 
 #### 3. "Weight setting failed"
+
 **Cause**: Insufficient stake or network issues
 **Solution**:
+
 - Check wallet balance
 - Verify registration status
 - Check network connection
 
 #### 4. "Database initialization failed"
+
 **Cause**: Unable to connect to external API
 **Solution**:
+
 - Validator will use fallback data
 - Check API configuration
 - Verify network connectivity
@@ -594,4 +634,5 @@ This project is licensed under the MIT License.
 ## Support
 
 For technical support:
+
 - GitHub Issues: Report bugs and request features
