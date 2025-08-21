@@ -46,17 +46,21 @@ class ResponseValidator:
             response_dict = response.model_dump()
 
             structure_score = await self._validate_structure(response_dict, query.analysis_type)
+            if structure_score < 0.3:
+                return structure_score
 
             api_score = 0.0
             if structure_score > 0.3:  # Only do API validation if structure is reasonable
                 api_score = await self._validate_against_api(query.ticker, query.analysis_type, response_dict)
+
+            if api_score < 0.5:
+                return min(structure_score, api_score)
 
             time_score = self._score_response_time(response_time)
 
             confidence_score = self._score_confidence(response)
 
             bt.logging.info(f"Scores: structure={structure_score:.3f}, api={api_score:.3f}, time={time_score:.3f}, confidence={confidence_score:.3f}")
-            bt.logging.debug(f"Weights: structure={self.structure_weight:.2f}, api={self.api_validation_weight:.2f}")
 
             final_score = (
                 structure_score * self.structure_weight +
@@ -100,7 +104,7 @@ class ResponseValidator:
 
                 bt.logging.warning(f"⚠️ Structure validation failed: {errors[:3]}")  # Log first 3 errors
 
-                return 0.1
+                return 0.0
 
             base_score = validation_details['completenessScore']
 
@@ -136,11 +140,11 @@ class ResponseValidator:
         """
         try:
             if not response_data.get('success'):
-                return 0.2  # Low score for unsuccessful responses
+                return 0.0
 
             miner_data = response_data.get('data', {})
             if not miner_data:
-                return 0.1
+                return 0.0
 
             # Get validation data from external API using POST method
             async with self.external_api_client:
@@ -149,7 +153,7 @@ class ResponseValidator:
             if not api_result or not api_result.get('valid'):
                 self.validation_stats['api_failures'] += 1
                 bt.logging.warning(f"⚠️ API validation failed for {ticker}: {api_result.get('error', 'Unknown error')}")
-                return 0.2
+                return 0.0
 
             field_scores = api_result.get('field_scores', {})
             overall_score = api_result.get('score', 0.0)

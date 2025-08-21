@@ -1,6 +1,5 @@
-import statistics
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import List
 
 import numpy as np
 
