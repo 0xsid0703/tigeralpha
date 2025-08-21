@@ -182,13 +182,12 @@ class CompanyIntelligenceValidator:
         return validation_results
 
     def get_available_miners(self) -> List[int]:
-        available_uids = []
+        ip_port_map = {}
 
         for uid in range(len(self.metagraph.hotkeys)):
             try:
                 axon = self.metagraph.axons[uid]
                 stake = self.metagraph.total_stake[uid]
-
                 is_available = (
                     axon.ip != '0.0.0.0' and
                     axon.port > 0 and
@@ -197,12 +196,16 @@ class CompanyIntelligenceValidator:
                 )
 
                 if is_available:
-                    available_uids.append(uid)
+                    # Deduplicate by IP, keep lowest port
+                    if axon.ip not in ip_port_map or axon.port < self.metagraph.axons[ip_port_map[axon.ip]].port:
+                        ip_port_map[axon.ip] = uid
             except Exception as e:
                 bt.logging.debug(f"⚠️ Error checking miner {uid}: {e}")
                 continue
 
-        bt.logging.info(f"📊 Found {len(available_uids)} available miners")
+        available_uids = list(ip_port_map.values())
+
+        bt.logging.info(f"📊 Found {len(available_uids)} valid available miners")
 
         return available_uids
 
@@ -235,7 +238,7 @@ class CompanyIntelligenceValidator:
                 bt.logging.success(f"✅ Successfully set weights for {len(all_miner_uids)} UIDs")
 
                 miner_weight_pairs = list(zip(all_miner_uids, weights))
-                top_performers = sorted(miner_weight_pairs, key=lambda x: x[1], reverse=True)[:5]
+                top_performers = sorted(miner_weight_pairs, key=lambda x: x[1], reverse=True)[:15]
                 bt.logging.info(f"🏆 Top performers: {top_performers}")
             else:
                 bt.logging.error("❌ Failed to set weights")
