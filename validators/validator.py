@@ -6,7 +6,7 @@ import random
 import time
 import traceback
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List
 
 import bittensor as bt
 
@@ -87,6 +87,10 @@ class CompanyIntelligenceValidator:
         max_miners = min(self.config.validator.max_concurrent_miners, len(miner_uids))
         sample_size = min(self.config.neuron.sample_size, max_miners)
         sampled_uids = random.sample(miner_uids, sample_size)
+
+        if self.step == 0:
+            # Send initial query to all miners
+            sampled_uids = miner_uids
 
         # Generate intelligent query
         organic = self.step % 10 == 0
