@@ -1,13 +1,12 @@
 import asyncio
-import json
+import ssl
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
-import aiohttp
 import bittensor as bt
-from aiohttp import ClientSession, ClientTimeout, TCPConnector
+import httpx
 
 from config.config import appConfig as config
 
@@ -25,11 +24,9 @@ class RateLimiter:
         """Wait if rate limit would be exceeded."""
         async with self.lock:
             now = time.time()
-            # Remove old requests outside the time window
             self.requests = [req_time for req_time in self.requests if now - req_time < self.time_window]
 
             if len(self.requests) >= self.max_requests:
-                # Calculate wait time
                 oldest_request = min(self.requests)
                 wait_time = self.time_window - (now - oldest_request)
                 if wait_time > 0:
@@ -41,25 +38,21 @@ class RateLimiter:
 
 
 class ExternalAPIClient:
-    """Client for interacting with the external financial API."""
 
     def __init__(self):
         self.base_url = config.CRYPTO_HOLDINGS_BASE_URL
         self.api_key = config.CRYPTO_HOLDINGS_API_KEY
-        self.session: Optional[ClientSession] = None
+        self.client: Optional[httpx.AsyncClient] = None
         self.rate_limiter = RateLimiter(max_requests=100, time_window=60)
 
-        # Connection settings (will be used when session is created)
-        self.connection_limit = config.API_MANAGER_CONNECTION_LIMIT
-        self.dns_cache_ttl = config.API_MANAGER_DNS_CACHE
-        self.client_timeout = config.API_MANAGER_CLIENT_TIMEOUT
-
-        # Cache for API responses
         self.cache = {}
         self.cache_ttl = config.CACHE_TTL
 
-        # Initialize flag
         self._initialized = False
+        self._client_lock = asyncio.Lock()
+
+        self.max_retries = 2
+        self.retry_delay = 1.0
 
     async def __aenter__(self):
         await self.initialize()
@@ -69,118 +62,236 @@ class ExternalAPIClient:
         await self.close()
 
     async def initialize(self):
-        """Initialize the HTTP session."""
-        if self.session is None or self.session.closed:
-            # Create connector and timeout in async context
-            connector = TCPConnector(
-                limit=self.connection_limit,
-                ttl_dns_cache=self.dns_cache_ttl,
-                use_dns_cache=True
-            )
+        """Initialize the httpx client with robust SSL handling."""
+        async with self._client_lock:
+            if self.client is None or self.client.is_closed:
+                try:
+                    headers = {
+                        'Authorization': f'Bearer {self.api_key}',
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'Bittensor-CompanyIntelligence/1.0',
+                        'Connection': 'close'
+                    }
 
-            timeout = ClientTimeout(total=self.client_timeout)
+                    ssl_context = ssl.create_default_context()
+                    ssl_context.check_hostname = True
+                    ssl_context.verify_mode = ssl.CERT_REQUIRED
 
-            headers = {
-                'Authorization': f'Bearer {self.api_key}',
-                'Content-Type': 'application/json',
-                'User-Agent': 'Bittensor-CompanyIntelligence/1.0'
-            }
+                    # Configure httpx with conservative settings to avoid SSL issues
+                    self.client = httpx.AsyncClient(
+                        headers=headers,
+                        timeout=httpx.Timeout(
+                            connect=15.0,
+                            read=30.0,
+                            write=10.0,
+                            pool=60.0
+                        ),
+                        limits=httpx.Limits(
+                            max_keepalive_connections=0,
+                            max_connections=3,
+                            keepalive_expiry=0
+                        ),
+                        verify=ssl_context,
+                        http1=True,
+                        http2=False,
+                        follow_redirects=True
+                    )
 
-            self.session = ClientSession(
-                connector=connector,
-                timeout=timeout,
-                headers=headers
-            )
-            self._initialized = True
-            bt.logging.info("🌐 External API client initialized")
+                    self._initialized = True
+
+                except Exception as e:
+                    bt.logging.error(f"💥 Failed to initialize httpx client: {e}")
+                    self._initialized = False
+                    raise
 
     async def close(self):
-        """Close the HTTP session."""
-        if self.session and not self.session.closed:
-            await self.session.close()
-            self.session = None
-            self._initialized = False
+        """Close the httpx client."""
+        async with self._client_lock:
+            if self.client and not self.client.is_closed:
+                await self.client.aclose()
+                self.client = None
+                self._initialized = False
+                bt.logging.debug("🔒 httpx API client closed")
+
+    async def _recreate_client(self):
+        bt.logging.info("🔄 Recreating httpx client due to connection issues")
+
+        await self.close()
+        await asyncio.sleep(0.2)
+        await self.initialize()
 
     def _get_cache_key(self, endpoint: str, params: Dict = None) -> str:
-        """Generate cache key for request."""
         key = endpoint
+
         if params:
             sorted_params = sorted(params.items())
             key += "_" + "_".join([f"{k}={v}" for k, v in sorted_params])
+
         return key
 
     def _is_cache_valid(self, cache_entry: Dict) -> bool:
         """Check if cache entry is still valid."""
+
         if not cache_entry:
             return False
 
         cached_time = cache_entry.get('timestamp', 0)
+
         return (time.time() - cached_time) < self.cache_ttl
 
-    async def _make_request(self, endpoint: str, params: Dict = None, use_cache: bool = True) -> Optional[Dict]:
+    def _is_connection_error(self, error: Exception) -> bool:
+        """Check if error is related to connection/SSL issues."""
+
+        error_types = (
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            httpx.ReadTimeout,
+            httpx.WriteTimeout,
+            httpx.PoolTimeout,
+            httpx.ProxyError,
+            httpx.UnsupportedProtocol
+        )
+
+        # Also check for SSL-related errors in the error message
+        error_msg = str(error).lower()
+        ssl_keywords = ['ssl', 'certificate', 'handshake', 'close_notify', 'tls']
+
+        return isinstance(error, error_types) or any(keyword in error_msg for keyword in ssl_keywords)
+
+    async def _make_request_with_retry(self, method: str, endpoint: str, params: Dict = None,
+                                       json_data: Dict = None, use_cache: bool = True) -> Optional[Dict]:
+        """Make HTTP request with comprehensive retry logic."""
+        last_error = None
+
+        for attempt in range(self.max_retries):
+            try:
+                if attempt > 0:
+                    await self._recreate_client()
+                    delay = min(0.5 * (2 ** attempt), 5.0)
+                    await asyncio.sleep(delay)
+
+                return await self._make_request(method, endpoint, params, json_data, use_cache)
+
+            except Exception as e:
+                last_error = e
+                error_msg = str(e)
+
+                if self._is_connection_error(e):
+                    bt.logging.warning(f"🔒 Connection/SSL error on attempt {attempt + 1}/{self.max_retries}: {error_msg}")
+                    if attempt < self.max_retries - 1:
+                        await self._recreate_client()
+                        delay = self.retry_delay * (2 ** attempt) + 0.5
+                        bt.logging.info(f"🔄 Connection retry in {delay:.1f}s...")
+                        await asyncio.sleep(delay)
+                        continue
+
+                elif isinstance(e, (httpx.TimeoutException, httpx.RequestError)):
+                    bt.logging.warning(f"⏰ Request error on attempt {attempt + 1}/{self.max_retries}: {error_msg}")
+                    if attempt < self.max_retries - 1:
+                        delay = self.retry_delay * (2 ** attempt)
+                        bt.logging.info(f"🔄 Request retry in {delay:.1f}s...")
+                        await asyncio.sleep(delay)
+                        continue
+
+                else:
+                    bt.logging.error(f"💥 Unexpected error on attempt {attempt + 1}: {error_msg}")
+                    if attempt < self.max_retries - 1:
+                        await asyncio.sleep(1)
+                        await self._recreate_client()
+                        continue
+
+                break
+
+        bt.logging.error(f"💥 All {self.max_retries} retry attempts failed for {endpoint}. Last error: {last_error}")
+
+        return None
+
+    async def _make_request(self, method: str, endpoint: str, params: Dict = None,
+                            json_data: Dict = None, use_cache: bool = True) -> Optional[Dict]:
         """Make HTTP request with caching and error handling."""
-        # Ensure session is initialized
-        if not self._initialized or self.session is None or self.session.closed:
+        # Ensure client is initialized
+        if not self._initialized or self.client is None or self.client.is_closed:
             await self.initialize()
 
-        cache_key = self._get_cache_key(endpoint, params)
+        # Check cache for GET requests
+        if method.upper() == 'GET' and use_cache:
+            cache_key = self._get_cache_key(endpoint, params)
+            if cache_key in self.cache:
+                cache_entry = self.cache[cache_key]
+                if self._is_cache_valid(cache_entry):
+                    bt.logging.debug(f"📋 Cache hit for {endpoint}")
+                    return cache_entry['data']
 
-        # Check cache first
-        if use_cache and cache_key in self.cache:
-            cache_entry = self.cache[cache_key]
-            if self._is_cache_valid(cache_entry):
-                bt.logging.debug(f"📋 Cache hit for {endpoint}")
-                return cache_entry['data']
-
-        # Rate limiting
         await self.rate_limiter.acquire()
 
         url = urljoin(self.base_url, endpoint)
 
         try:
-            bt.logging.debug(f"🌐 Making API request to {endpoint}")
+            request_kwargs = {}
+            if params:
+                request_kwargs['params'] = params
+            if json_data:
+                request_kwargs['json'] = json_data
 
-            async with self.session.get(url, params=params) as response:
-                if response.status == 200:
-                    data = await response.json()
+            request_kwargs['headers'] = {
+                'Connection': 'close',
+                'Cache-Control': 'no-cache'
+            }
 
-                    if not isinstance(data, dict):
-                        bt.logging.error(f"❌ Invalid response format from {endpoint}: {data}")
-                        return None
+            response = await self.client.request(method, url, **request_kwargs)
 
-                    if 'result' not in data:
-                        bt.logging.error(f"❌ Missing 'result' in response from {endpoint}: {data}")
-                        return None
-
-                    # Cache the response
-                    if use_cache:
-                        self.cache[cache_key] = {
-                            'data': data['result'],
-                            'timestamp': time.time()
-                        }
-
-                    return data['result']
-
-                elif response.status == 429:
-                    bt.logging.warning(f"⚠️ Rate limited by external API, status {response.status}")
-                    await asyncio.sleep(5)  # Back off
-                    return await self._make_request(endpoint, params, use_cache)
-
-                else:
-                    bt.logging.error(f"❌ External API error: {response.status} - {await response.text()}")
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                except Exception as json_error:
+                    bt.logging.error(f"❌ Failed to parse JSON response: {json_error}")
                     return None
 
-        except asyncio.TimeoutError:
-            bt.logging.error(f"⏰ Timeout making request to {endpoint}")
-            return None
+                if not isinstance(data, dict):
+                    bt.logging.error(f"❌ Invalid response format from {endpoint}: {type(data)}")
+                    return None
+
+                if 'result' not in data:
+                    bt.logging.error(f"❌ Missing 'result' in response from {endpoint}")
+                    return None
+
+                if method.upper() == 'GET' and use_cache:
+                    cache_key = self._get_cache_key(endpoint, params)
+                    self.cache[cache_key] = {
+                        'data': data['result'],
+                        'timestamp': time.time()
+                    }
+
+                return data['result']
+
+            elif response.status_code == 429:
+                bt.logging.warning(f"⚠️ Rate limited by external API, status {response.status_code}")
+                raise httpx.HTTPStatusError(
+                    f"Rate limited: {response.status_code}",
+                    request=response.request,
+                    response=response
+                )
+
+            else:
+                error_text = response.text
+                bt.logging.error(f"❌ External API error: {response.status_code} - {error_text}")
+                return None
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429:
+                raise
+            else:
+                bt.logging.error(f"🔴 HTTP status error: {e}")
+                return None
+
         except Exception as e:
-            bt.logging.error(f"💥 Error making request to {endpoint}: {e}")
-            return None
+            bt.logging.debug(f"🔍 Request exception for {endpoint}: {e}")
+            raise
 
     async def get_companies_list(self) -> List[Dict[str, Any]]:
         """Get list of all available companies."""
         try:
-            data = await self._make_request(config.COMPANIES_ENDPOINT)
+            data = await self._make_request_with_retry('GET', config.COMPANIES_ENDPOINT)
             if data and isinstance(data, list):
                 bt.logging.info(f"📊 Retrieved {len(data)} companies from external API")
                 return data
@@ -207,9 +318,7 @@ class ExternalAPIClient:
                     'score': 0.0
                 }
 
-            # Process field scores from API response
             validation_result = self._process_validation_scores(validation_response, ticker)
-
             return validation_result
 
         except Exception as e:
@@ -221,49 +330,11 @@ class ExternalAPIClient:
             }
 
     async def _post_validation_request(self, request_body: Dict[str, Any], ticker: str, analysis_type: str) -> Optional[Dict[str, Any]]:
-        """Send POST request to validation endpoint."""
-        if not self._initialized or self.session is None or self.session.closed:
-            await self.initialize()
-
-        # Rate limiting
-        await self.rate_limiter.acquire()
-
         validation_endpoint = config.VALIDATION_ENDPOINT
         validation_endpoint = validation_endpoint.replace('<ticker>', ticker)
         validation_endpoint = validation_endpoint.replace('<analysis_type>', analysis_type)
 
-        url = urljoin(self.base_url, validation_endpoint)
-
-        try:
-            bt.logging.debug(f"🌐 Posting validation request to {validation_endpoint}")
-
-            async with self.session.post(url, json=request_body) as response:
-                if response.status == 200:
-                    data = await response.json()
-
-                    if 'result' not in data:
-                        bt.logging.error(f"❌ Invalid response format from validation API: {data}")
-                        return None
-
-                    bt.logging.debug(f"✅ Validation response received: {response.status}")
-                    return data['result']
-
-                elif response.status == 429:
-                    bt.logging.warning(f"⚠️ Rate limited by validation API, status {response.status}")
-                    await asyncio.sleep(5)  # Back off
-                    return await self._post_validation_request(request_body, ticker, analysis_type)
-
-                else:
-                    error_text = await response.text()
-                    bt.logging.error(f"❌ Validation API error: {response.status} - {error_text}")
-                    return None
-
-        except asyncio.TimeoutError:
-            bt.logging.error(f"⏰ Timeout posting validation request")
-            return None
-        except Exception as e:
-            bt.logging.error(f"💥 Error posting validation request: {e}")
-            return None
+        return await self._make_request_with_retry('POST', validation_endpoint, json_data=request_body, use_cache=False)
 
     def _process_validation_scores(self, api_response: Dict[str, Any], ticker: str) -> Dict[str, Any]:
         """Process field scores from API response into validation result."""
@@ -277,9 +348,6 @@ class ExternalAPIClient:
         }
 
         try:
-            bt.logging.debug(f"📊 Processing validation scores for {api_response}")
-
-            # Extract field scores from API response
             field_scores = api_response.get('fieldScores', {})
 
             if not field_scores:
@@ -290,87 +358,46 @@ class ExternalAPIClient:
                     'score': 0.0
                 }
 
-            # Store individual field scores
             validation_result['field_scores'] = field_scores
 
-            # Calculate weighted overall score
             total_score = 0.0
             total_weight = 0.0
 
-            # Define field weights for overall score calculation
             field_weights = {
-                'company.companyName': 1.5,       # Company name - important
-                'company.ticker': 1.0,            # Ticker symbol
-                'company.marketCap': 2.0,         # Market cap - very important
-                'company.sharePrice': 1.8,        # Share price - important
-                'company.sector': 1.2,            # Sector classification
-                'company.industry': 1.0,          # Industry classification
-                'company.website': 0.8,           # Website URL
-                'company.exchange': 1.0,          # Exchange listing
-                'company.volume': 1.5,            # Trading volume
-                'company.eps': 1.3,               # Earnings per share
-                'company.bookValue': 1.0,         # Book value
-                'cryptoHoldings': 1.8,    # Crypto holdings - important for crypto analysis
-                'totalCryptoValue': 1.8,  # Total crypto value
-                'sentiment': 1.0,         # Sentiment analysis
-                'sentimentScore': 1.0,    # Sentiment score
-                'newsArticles': 0.8,      # News article count
-                'totalArticles': 0.8      # Total articles
+                'company.companyName': 1.5,
+                'company.ticker': 1.0,
+                'company.marketCap': 2.0,
+                'company.sharePrice': 1.8,
+                'company.sector': 1.2,
+                'company.industry': 1.0,
+                'company.website': 0.8,
+                'company.exchange': 1.0,
+                'company.volume': 1.5,
+                'company.eps': 1.3,
+                'company.bookValue': 1.0,
+                'cryptoHoldings': 1.8,
+                'totalCryptoValue': 1.8,
+                'sentiment': 1.0,
+                'sentimentScore': 1.0,
+                'newsArticles': 0.8,
+                'totalArticles': 0.8
             }
 
-            # Calculate weighted score
             for field, score in field_scores.items():
                 if not isinstance(score, (int, float)):
                     bt.logging.warning(f"⚠️ Invalid score type for field {field}: {type(score)}")
                     continue
 
-                # Ensure score is between 0 and 1
                 normalized_score = max(0.0, min(1.0, float(score)))
-
-                # Get weight for this field
                 weight = field_weights.get(field, 1.0)
 
                 total_score += normalized_score * weight
                 total_weight += weight
 
-                # Add field details
-                if normalized_score >= 0.9:
-                    validation_result['details'][field] = 'excellent'
-                elif normalized_score >= 0.7:
-                    validation_result['details'][field] = 'good'
-                elif normalized_score >= 0.5:
-                    validation_result['details'][field] = 'fair'
-                elif normalized_score >= 0.3:
-                    validation_result['details'][field] = 'poor'
-                else:
-                    validation_result['details'][field] = 'very_poor'
-
-            # Calculate final score
             if total_weight > 0:
                 validation_result['score'] = total_score / total_weight
             else:
                 validation_result['score'] = 0.0
-
-            # Add summary statistics
-            validation_result['summary'] = {
-                'total_fields_validated': len(field_scores),
-                'average_field_score': sum(field_scores.values()) / len(field_scores) if field_scores else 0.0,
-                'high_scoring_fields': len([s for s in field_scores.values() if s >= 0.8]),
-                'low_scoring_fields': len([s for s in field_scores.values() if s < 0.5]),
-                'validation_confidence': min(1.0, len(field_scores) / 10.0)  # Confidence based on number of fields
-            }
-
-            # Add data freshness if provided by API
-            if 'freshnessScore' in api_response:
-                freshness_score = float(api_response['freshnessScore'])
-                validation_result['freshnessScore'] = freshness_score
-                validation_result['details']['freshness'] = self._classify_freshness(freshness_score)
-
-            # Add completeness score if provided by API
-            if 'completenessScore' in api_response:
-                completeness_score = float(api_response['completenessScore'])
-                validation_result['completenessScore'] = completeness_score
-                validation_result['details']['completeness'] = self._classify_completeness(completeness_score)
 
             bt.logging.debug(f"📊 Validation result for {ticker}: score={validation_result['score']:.3f}, fields={len(field_scores)}")
 
@@ -383,29 +410,3 @@ class ExternalAPIClient:
                 'error': f'Error processing validation scores: {str(e)}',
                 'score': 0.0
             }
-
-    def _classify_freshness(self, score: float) -> str:
-        """Classify freshness score into categories."""
-        if score >= 0.9:
-            return 'very_fresh'
-        elif score >= 0.7:
-            return 'fresh'
-        elif score >= 0.5:
-            return 'moderate'
-        elif score >= 0.3:
-            return 'stale'
-        else:
-            return 'very_stale'
-
-    def _classify_completeness(self, score: float) -> str:
-        """Classify completeness score into categories."""
-        if score >= 0.9:
-            return 'complete'
-        elif score >= 0.7:
-            return 'mostly_complete'
-        elif score >= 0.5:
-            return 'partial'
-        elif score >= 0.3:
-            return 'limited'
-        else:
-            return 'minimal'
