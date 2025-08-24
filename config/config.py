@@ -36,6 +36,8 @@ class Config:
     # Data Storage Configuration (In-Memory)
     DATA_DIRECTORY: str = os.getenv("DATA_DIRECTORY", "data")
 
+    VALIDATOR_STATE_FILE: str = os.getenv("VALIDATOR_STATE_FILE", "validator_state.json")
+
     # Validation Configuration
     STRUCTURE_VALIDATION_WEIGHT: float = float(os.getenv("STRUCTURE_VALIDATION_WEIGHT", "0.3"))
     API_VALIDATION_WEIGHT: float = float(os.getenv("API_VALIDATION_WEIGHT", "0.7"))

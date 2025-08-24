@@ -299,7 +299,7 @@ class CompanyIntelligenceValidator:
                 'company_db_stats': self.company_db.get_database_stats(),
             }
 
-            state_file = os.path.join(config.DATA_DIRECTORY, 'validator_state.json')
+            state_file = os.path.join(config.DATA_DIRECTORY, config.VALIDATOR_STATE_FILE)
             with open(state_file, 'w') as f:
                 json.dump(stats, f, indent=2, default=str)
 
@@ -311,7 +311,7 @@ class CompanyIntelligenceValidator:
     def load_state(self):
         """Load validator state from persistence (in-memory only)."""
         try:
-            state_file = os.path.join(config.DATA_DIRECTORY, 'validator_state.json')
+            state_file = os.path.join(config.DATA_DIRECTORY, config.VALIDATOR_STATE_FILE)
             if not os.path.exists(state_file):
                 bt.logging.info("📋 No previous state found, starting fresh")
                 return
