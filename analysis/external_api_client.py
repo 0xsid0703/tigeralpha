@@ -11,39 +11,12 @@ import httpx
 from config.config import appConfig as config
 
 
-class RateLimiter:
-    """Simple rate limiter for API calls."""
-
-    def __init__(self, max_requests: int = 100, time_window: int = 60):
-        self.max_requests = max_requests
-        self.time_window = time_window
-        self.requests = []
-        self.lock = asyncio.Lock()
-
-    async def acquire(self):
-        """Wait if rate limit would be exceeded."""
-        async with self.lock:
-            now = time.time()
-            self.requests = [req_time for req_time in self.requests if now - req_time < self.time_window]
-
-            if len(self.requests) >= self.max_requests:
-                oldest_request = min(self.requests)
-                wait_time = self.time_window - (now - oldest_request)
-                if wait_time > 0:
-                    bt.logging.info(f"⏱️ Rate limit reached, waiting {wait_time:.2f}s")
-                    await asyncio.sleep(wait_time)
-                    return await self.acquire()
-
-            self.requests.append(now)
-
-
 class ExternalAPIClient:
 
     def __init__(self):
         self.base_url = config.CRYPTO_HOLDINGS_BASE_URL
         self.api_key = config.CRYPTO_HOLDINGS_API_KEY
         self.client: Optional[httpx.AsyncClient] = None
-        self.rate_limiter = RateLimiter(max_requests=100, time_window=60)
 
         self.cache = {}
         self.cache_ttl = config.CACHE_TTL
@@ -221,8 +194,6 @@ class ExternalAPIClient:
                 if self._is_cache_valid(cache_entry):
                     bt.logging.debug(f"📋 Cache hit for {endpoint}")
                     return cache_entry['data']
-
-        await self.rate_limiter.acquire()
 
         url = urljoin(self.base_url, endpoint)
 
