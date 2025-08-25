@@ -521,7 +521,6 @@ bittensor-company-intelligence-validator/
 # Development environment
 export ENVIRONMENT=development
 export DEBUG_MODE=true
-export VERBOSE_LOGGING=true
 
 # Enable detailed validation logging
 export SAVE_VALIDATION_DETAILS=true
@@ -581,7 +580,6 @@ Enable debug mode for detailed logging:
 
 ```bash
 export DEBUG_MODE=true
-export VERBOSE_LOGGING=true
 export SAVE_VALIDATION_DETAILS=true
 ```
 

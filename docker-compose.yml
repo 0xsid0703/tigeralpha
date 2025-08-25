@@ -24,7 +24,6 @@ services:
       - COMPANY_CACHE_DURATION_HOURS=1
 
       # Feature Flags
-      - ENABLE_QUERY_CACHING=true
       - ENABLE_COMPANY_REFRESH=true
 
       # Performance Configuration

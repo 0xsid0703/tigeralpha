@@ -1,9 +1,9 @@
 import os
-from typing import Optional
 
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+from neurons.protocol import AnalysisType
+
 load_dotenv()
 
 
@@ -55,10 +55,6 @@ class Config:
     SENTIMENT_ANALYSIS_WEIGHT: float = float(os.getenv("SENTIMENT_ANALYSIS_WEIGHT", "0.15"))
     NEWS_ANALYSIS_WEIGHT: float = float(os.getenv("NEWS_ANALYSIS_WEIGHT", "0.15"))
 
-    # Rate Limiting
-    API_RATE_LIMIT_REQUESTS: int = int(os.getenv("API_RATE_LIMIT_REQUESTS", "100"))
-    API_RATE_LIMIT_TIME_WINDOW: int = int(os.getenv("API_RATE_LIMIT_TIME_WINDOW", "60"))
-
     # Miner Configuration
     MAX_CONCURRENT_MINERS: int = int(os.getenv("MAX_CONCURRENT_MINERS", "20"))
     MINER_TIMEOUT: int = int(os.getenv("MINER_TIMEOUT", "15"))
@@ -66,19 +62,12 @@ class Config:
     # Cleanup Configuration
     VALIDATION_HISTORY_RETENTION_DAYS: int = int(os.getenv("VALIDATION_HISTORY_RETENTION_DAYS", "7"))
     QUERY_HISTORY_RETENTION_DAYS: int = int(os.getenv("QUERY_HISTORY_RETENTION_DAYS", "7"))
-    COMPANY_DATA_CLEANUP_DAYS: int = int(os.getenv("COMPANY_DATA_CLEANUP_DAYS", "30"))
-
-    # Monitoring Configuration
-    ENABLE_METRICS: bool = os.getenv("ENABLE_METRICS", "true").lower() == "true"
-    METRICS_RETENTION_HOURS: int = int(os.getenv("METRICS_RETENTION_HOURS", "168"))  # 1 week
 
     # Feature Flags
-    ENABLE_QUERY_CACHING: bool = os.getenv("ENABLE_QUERY_CACHING", "true").lower() == "true"
     ENABLE_COMPANY_REFRESH: bool = os.getenv("ENABLE_COMPANY_REFRESH", "true").lower() == "true"
 
     # Development/Debug Configuration
     DEBUG_MODE: bool = os.getenv("DEBUG_MODE", "false").lower() == "true"
-    VERBOSE_LOGGING: bool = os.getenv("VERBOSE_LOGGING", "false").lower() == "true"
     SAVE_VALIDATION_DETAILS: bool = os.getenv("SAVE_VALIDATION_DETAILS", "false").lower() == "true"
 
     @classmethod
@@ -96,12 +85,10 @@ class Config:
         if not cls.API_TOKEN:
             errors.append("API_TOKEN is required for HTTP authentication")
 
-        # Validation weights must sum to 1.0
         total_validation_weight = cls.STRUCTURE_VALIDATION_WEIGHT + cls.API_VALIDATION_WEIGHT
         if abs(total_validation_weight - 1.0) > 0.01:
             errors.append(f"Validation weights must sum to 1.0, got {total_validation_weight}")
 
-        # Query strategy weights validation
         total_strategy_weight = (
             cls.POPULAR_COMPANIES_WEIGHT + cls.EMERGING_COMPANIES_WEIGHT +
             cls.SECTOR_FOCUSED_WEIGHT + cls.CRYPTO_FOCUSED_WEIGHT + cls.RANDOM_SELECTION_WEIGHT
@@ -117,11 +104,9 @@ class Config:
         if abs(total_analysis_weight - 1.0) > 0.01:
             errors.append(f"Analysis type weights must sum to 1.0, got {total_analysis_weight}")
 
-        # Port validation
         if not (1 <= cls.VALIDATOR_PORT <= 65535):
             errors.append(f"VALIDATOR_PORT must be between 1 and 65535, got {cls.VALIDATOR_PORT}")
 
-        # Positive value validations
         if cls.CACHE_TTL <= 0:
             errors.append("CACHE_TTL must be positive")
 
@@ -141,7 +126,6 @@ class Config:
 
     @classmethod
     def get_strategy_weights(cls) -> dict:
-        """Get query strategy weights as a dictionary."""
         return {
             'popular_companies': cls.POPULAR_COMPANIES_WEIGHT,
             'emerging_companies': cls.EMERGING_COMPANIES_WEIGHT,
@@ -152,8 +136,6 @@ class Config:
 
     @classmethod
     def get_analysis_weights(cls) -> dict:
-        """Get analysis type weights as a dictionary."""
-        from neurons.protocol import AnalysisType
         return {
             AnalysisType.CRYPTO: cls.CRYPTO_ANALYSIS_WEIGHT,
             AnalysisType.FINANCIAL: cls.FINANCIAL_ANALYSIS_WEIGHT,
@@ -162,45 +144,33 @@ class Config:
         }
 
 
-# Create global config instance
 appConfig = Config()
-
-# Environment-specific configurations
 
 
 def load_environment_config(env: str = None):
-    """Load environment-specific configuration."""
     if env is None:
         env = os.getenv('ENVIRONMENT', 'development')
 
     if env == 'production':
-        # Production-specific settings
-        appConfig.VERBOSE_LOGGING = False
         appConfig.DEBUG_MODE = False
-        appConfig.CACHE_TTL = 300  # 5 minutes
+        appConfig.CACHE_TTL = 300
         appConfig.VALIDATOR_LOG_LEVEL = 'info'
 
     elif env == 'staging':
-        # Staging-specific settings
-        appConfig.VERBOSE_LOGGING = True
         appConfig.DEBUG_MODE = False
-        appConfig.CACHE_TTL = 180  # 3 minutes
+        appConfig.CACHE_TTL = 180
         appConfig.VALIDATOR_LOG_LEVEL = 'debug'
 
     elif env == 'development':
-        # Development-specific settings
-        appConfig.VERBOSE_LOGGING = True
         appConfig.DEBUG_MODE = True
-        appConfig.CACHE_TTL = 60  # 1 minute
+        appConfig.CACHE_TTL = 60
         appConfig.VALIDATOR_LOG_LEVEL = 'debug'
         appConfig.SAVE_VALIDATION_DETAILS = True
 
     print(f"🌍 Loaded {env} environment configuration")
 
 
-# Auto-load environment configuration
 load_environment_config()
 
-# Validate configuration on import
 if not appConfig.validate_config():
     raise ValueError("Invalid configuration detected. Please check your environment variables.")
