@@ -369,8 +369,7 @@ class CompanyIntelligenceValidator:
                     self.last_update = datetime.now(timezone.utc)
                     self.step += 1
 
-                    if self.step % 10 == 0:
-                        self.save_state()
+                    self.save_state()
 
                     await asyncio.sleep(sleep_time)
                 except KeyboardInterrupt:
@@ -413,6 +412,8 @@ class CompanyIntelligenceValidator:
                     await asyncio.sleep(180)
 
                     self.step += 1
+
+                    self.save_state()
                 except KeyboardInterrupt:
                     bt.logging.info("⏹️ Background validator interrupted")
                     break
