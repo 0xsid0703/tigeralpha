@@ -146,7 +146,13 @@ class CompanyIntelligenceValidator:
                 queries_and_responses.append((query, dummy_response, avg_response_time))
 
         try:
-            scores = await self.response_validator.validate_batch_responses(queries_and_responses)
+            scores = []
+            batch_size = 15
+
+            for i in range(0, len(queries_and_responses), batch_size):
+                batch = queries_and_responses[i:i + batch_size]
+                batch_scores = await self.response_validator.validate_batch_responses(batch)
+                scores.extend(batch_scores)
 
             for i, (uid, score) in enumerate(zip(sampled_uids, scores)):
                 query_item, response_item, response_time = queries_and_responses[i]
