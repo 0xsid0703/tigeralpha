@@ -1,7 +1,7 @@
 import argparse
 import asyncio
 import traceback
-
+import requests
 import bittensor as bt
 
 from miners.api_manager import APIManager
