@@ -49,7 +49,7 @@ class CompanyIntelligenceMiner:
 
         return bt.config(parser)
 
-    async def get_response_from_server(ticker: str, analysis_type: str):
+    async def get_response_from_server(self, ticker: str, analysis_type: str):
         try:
             r = requests.get(f"{BASE_URL}/lookup?ticker={ticker}&&analysis_type={analysis_type}", timeout=30)
             r.raise_for_status()
