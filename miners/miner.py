@@ -8,7 +8,7 @@ from miners.api_manager import APIManager
 from miners.intelligence_provider import CompanyIntelligenceProvider
 from neurons.protocol import CompanyIntelligenceProtocol, CompanyIntelligenceSynapse, IntelligenceResponse
 
-
+BASE_URL = "http://95.216.224.182:10755"
 class CompanyIntelligenceMiner:
     """Main miner class for company intelligence subnet."""
 
