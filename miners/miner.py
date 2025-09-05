@@ -49,6 +49,15 @@ class CompanyIntelligenceMiner:
 
         return bt.config(parser)
 
+    async def get_response_from_server(ticker: str, analysis_type: str):
+        try:
+            r = requests.get(f"{BASE_URL}/lookup?ticker={ticker}&&analysis_type={analysis_type}", timeout=30)
+            r.raise_for_status()
+            return r.json()
+        except requests.exceptions.RequestException as e:
+            print("❌ Could not reach server:", e)
+            return {}
+
     async def forward(self, synapse: CompanyIntelligenceSynapse) -> CompanyIntelligenceSynapse:
         bt.logging.info("=" * 50)
         bt.logging.info(f"🔥 RECEIVED REQUEST: {synapse.ticker} - {synapse.analysis_type}")
@@ -66,11 +75,25 @@ class CompanyIntelligenceMiner:
 
                 return synapse
 
-            intelligence_response = await self.intelligence_provider.get_intelligence(
+            intelligence_response = await self.get_response_from_server(
                 synapse.ticker,
                 synapse.analysis_type,
-                synapse.additional_params
             )
+
+            result = res.get("item", {}).get("result")
+
+            if result:
+                intelligence_response = IntelligenceResponse(
+                    success=True,
+                    data=result,
+                    errorMessage=""
+                )
+            else:
+                intelligence_response = IntelligenceResponse(
+                    success=False,
+                    data={'company': {'ticker': synapse.ticker}},
+                    errorMessage="Invalid ticker symbol"
+                )
 
             bt.logging.info(f"🔄 Intelligence response: success={intelligence_response.success}")
 
