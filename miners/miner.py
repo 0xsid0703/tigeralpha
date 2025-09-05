@@ -75,7 +75,7 @@ class CompanyIntelligenceMiner:
 
                 return synapse
 
-            intelligence_response = await self.get_response_from_server(
+            res = await self.get_response_from_server(
                 synapse.ticker,
                 synapse.analysis_type,
             )
